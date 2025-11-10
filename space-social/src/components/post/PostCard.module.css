@@ -1,0 +1,45 @@
+.postCard {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.postCard:hover {
+  transform: translateY(-2px);
+}
+
+.avatarFallback {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 500;
+}
+
+.commentAvatar {
+  transition: all 0.2s ease-in-out;
+}
+
+.commentAvatar:hover {
+  transform: scale(1.05);
+}
+
+.actionButton {
+  transition: all 0.2s ease-in-out;
+}
+
+.actionButton:hover {
+  transform: translateY(-1px);
+}
+
+.commentInput {
+  transition: all 0.2s ease-in-out;
+}
+
+.commentInput:focus {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.showMoreButton {
+  transition: all 0.2s ease-in-out;
+}
+
+.showMoreButton:hover {
+  background-color: #eff6ff;
+}
