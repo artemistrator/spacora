@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { useSupabaseAuth } from '@/lib/auth'
 import { PostCard } from '@/components/post/PostCard'
 
@@ -16,13 +17,10 @@ interface Post {
   comments_count: number
   favorites_count: number
   images: string[]
-  spaceName?: string
-  spaceAvatarUrl?: string
-  followers_count?: number
-  posts_count?: number
 }
 
 export function InfiniteFeed() {
+  const router = useRouter()
   const { getSupabaseWithSession, userId } = useSupabaseAuth()
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(false)
@@ -31,21 +29,19 @@ export function InfiniteFeed() {
   const [channel, setChannel] = useState<any>(null)
   const observer = useRef<IntersectionObserver | null>(null)
   const ref = useRef<HTMLDivElement>(null)
+  const subscriptionCacheRef = useRef<Map<string, boolean>>(new Map())
+  const initialFetchDone = useRef(false)
 
   const fetchPosts = useCallback(async () => {
-    if (!hasMore || loading) return
+    if (loading) return
 
     setLoading(true)
     try {
       const supabaseClient = await getSupabaseWithSession()
       
-      // Fetch posts with pagination
       const { data, error } = await supabaseClient
         .from('posts')
-        .select(`
-          *,
-          spaces (id, name, avatar_url, owner_id, followers_count, posts_count)
-        `)
+        .select('*')
         .order('created_at', { ascending: false })
         .range(page * 10, (page + 1) * 10 - 1)
 
@@ -54,28 +50,22 @@ export function InfiniteFeed() {
       if (data.length === 0) {
         setHasMore(false)
       } else {
-        // Transform data to include space information
-        const postsWithSpaceInfo = data.map(post => ({
-          ...post,
-          spaceName: post.spaces?.name || 'Unknown Space',
-          spaceAvatarUrl: post.spaces?.avatar_url || null,
-          followers_count: post.spaces?.followers_count || 0,
-          posts_count: post.spaces?.posts_count || 0
-        }))
-
-        setPosts(prev => page === 0 ? postsWithSpaceInfo : [...prev, ...postsWithSpaceInfo])
+        setPosts(prev => page === 0 ? data : [...prev, ...data])
         setPage(prev => prev + 1)
       }
     } catch (error) {
-      console.error('Error fetching posts:', error)
     } finally {
       setLoading(false)
     }
-  }, [page, hasMore, loading, getSupabaseWithSession])
+  }, [page, loading])
 
+  // Only run initial fetch once
   useEffect(() => {
-    fetchPosts()
-  }, [fetchPosts])
+    if (!initialFetchDone.current && !loading) {
+      initialFetchDone.current = true
+      fetchPosts()
+    }
+  }, [])
 
   useEffect(() => {
     if (!userId) return
@@ -83,7 +73,6 @@ export function InfiniteFeed() {
     const setupSubscription = async () => {
       const supabaseClient = await getSupabaseWithSession()
       
-      // Set up real-time subscription for new posts
       const newChannel = supabaseClient
         .channel('public:posts')
         .on(
@@ -92,44 +81,33 @@ export function InfiniteFeed() {
           async (payload) => {
             const postSpaceId = payload.new.space_id
             
-            // Check if user is subscribed to this space
-            const { data: subscription } = await supabaseClient
-              .from('user_spaces')
-              .select('id')
-              .eq('clerk_id', userId)
-              .eq('space_id', postSpaceId)
-              .maybeSingle() // Changed from .single() to .maybeSingle()
-              
-            // Check if space is public
-            const { data: publicSpace } = await supabaseClient
-              .from('spaces')
-              .select('id')
-              .eq('id', postSpaceId)
-              .eq('is_public', true)
-              .maybeSingle() // Changed from .single() to .maybeSingle()
-              
-            // If user is subscribed or space is public, add the post
-            if (subscription || publicSpace) {
-              // Fetch space information for the new post
-              const { data: postWithSpace } = await supabaseClient
-                .from('posts')
-                .select(`
-                  *,
-                  spaces (id, name, avatar_url, owner_id, followers_count, posts_count)
-                `)
-                .eq('id', payload.new.id)
-                .maybeSingle() // Changed from .single() to .maybeSingle()
-                
-              if (postWithSpace) {
-                const postWithSpaceInfo = {
-                  ...postWithSpace,
-                  spaceName: postWithSpace.spaces?.name || 'Unknown Space',
-                  spaceAvatarUrl: postWithSpace.spaces?.avatar_url || null,
-                  followers_count: postWithSpace.spaces?.followers_count || 0,
-                  posts_count: postWithSpace.spaces?.posts_count || 0
+            if (!subscriptionCacheRef.current.has(postSpaceId)) {
+              const { data: space } = await supabaseClient
+                .from('spaces')
+                .select('id, is_public')
+                .eq('id', postSpaceId)
+                .maybeSingle()
+
+              if (space?.is_public) {
+                subscriptionCacheRef.current.set(postSpaceId, true)
+                setPosts(prev => [payload.new as Post, ...prev])
+              } else {
+                const { data: subscription } = await supabaseClient
+                  .from('user_spaces')
+                  .select('id')
+                  .eq('clerk_id', userId)
+                  .eq('space_id', postSpaceId)
+                  .maybeSingle()
+
+                if (subscription) {
+                  subscriptionCacheRef.current.set(postSpaceId, true)
+                  setPosts(prev => [payload.new as Post, ...prev])
+                } else {
+                  subscriptionCacheRef.current.set(postSpaceId, false)
                 }
-                setPosts(prev => [postWithSpaceInfo, ...prev])
               }
+            } else if (subscriptionCacheRef.current.get(postSpaceId)) {
+              setPosts(prev => [payload.new as Post, ...prev])
             }
           }
         )
@@ -173,7 +151,10 @@ export function InfiniteFeed() {
         <PostCard
           key={post.id}
           post={post}
-          onClick={() => window.location.href = `/post/${post.id}`}
+          onClick={() => router.push(`/post/${post.id}`)}
+          onPostDeleted={(postId) => {
+            setPosts(prevPosts => prevPosts.filter(p => p.id !== postId))
+          }}
         />
       ))}
       

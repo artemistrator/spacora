@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Folder as FolderIcon, Plus, Edit, Trash2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Folder as FolderIcon, Plus, Edit, Trash2, AlertTriangle, RefreshCw, Heart, Star } from 'lucide-react';
 import { useSupabaseAuth } from '@/lib/auth';
-import { Folder, getFoldersBySpaceId, createFolder, updateFolder, deleteFolder } from '@/lib/folder-utils';
+import { Folder, getFoldersBySpaceId, createFolder, updateFolder, deleteFolder, getFolderStats, FolderStats } from '@/lib/folder-utils';
 import { FolderModal } from '@/components/space/FolderModal';
 
 interface FolderListProps {
@@ -15,9 +15,9 @@ interface FolderListProps {
 }
 
 export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: FolderListProps) {
-  console.log('FolderList rendered with spaceId:', spaceId);
   const { getSupabaseWithSession, userId } = useSupabaseAuth();
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [folderStats, setFolderStats] = useState<Record<string, FolderStats>>({});
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingFolder, setEditingFolder] = useState<Folder | null>(null);
@@ -26,24 +26,27 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
   const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
-    console.log('FolderList useEffect triggered with spaceId:', spaceId);
     fetchFolders();
     checkOwnership();
   }, [spaceId, retryCount]);
 
   const fetchFolders = async () => {
-    console.log('FolderList fetchFolders called with spaceId:', spaceId);
     setLoading(true);
     setError(null);
     try {
       const supabaseClient = await getSupabaseWithSession();
       const fetchedFolders = await getFoldersBySpaceId(spaceId, supabaseClient);
-      console.log('FolderList fetched folders:', fetchedFolders);
       setFolders(fetchedFolders);
-    } catch (error: any) {
-      console.error('Error fetching folders:', error);
       
-      // Handle network errors specifically
+      const statsMap: Record<string, FolderStats> = {};
+      for (const folder of fetchedFolders) {
+        const stats = await getFolderStats(folder.id, supabaseClient);
+        if (stats) {
+          statsMap[folder.id] = stats;
+        }
+      }
+      setFolderStats(statsMap);
+    } catch (error: any) {
       if (error.message === 'Failed to fetch' || error.message === 'Request timeout') {
         setError('Проблемы с подключением к серверу. Проверьте интернет-соединение.');
       } else {
@@ -59,7 +62,6 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
   };
 
   const checkOwnership = async () => {
-    console.log('FolderList checkOwnership called with spaceId:', spaceId);
     try {
       const supabaseClient = await getSupabaseWithSession();
       const { data: spaceData, error } = await supabaseClient
@@ -67,14 +69,7 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
         .select('owner_id')
         .eq('id', spaceId)
         .maybeSingle();
-
-      console.log('FolderList checkOwnership result:', { spaceData, error });
-      if (spaceData && !error) {
-        // You would need to get the current user ID here
-        // For now, we'll assume the check is done elsewhere
-      }
     } catch (error) {
-      console.error('Error checking ownership:', error);
     }
   };
 
@@ -102,7 +97,6 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
       const supabaseClient = await getSupabaseWithSession();
       const success = await deleteFolder(folderId, userId, supabaseClient);
       if (success) {
-        // If we're deleting the currently selected folder, clear the selection
         if (selectedFolderId === folderId && onFolderSelect) {
           onFolderSelect(null);
         }
@@ -111,7 +105,6 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
         alert('Ошибка при удалении папки');
       }
     } catch (error) {
-      console.error('Error deleting folder:', error);
       alert('Ошибка при удалении папки');
     }
   };
@@ -126,11 +119,9 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
       const supabaseClient = await getSupabaseWithSession();
       let success = false;
       if (editingFolder) {
-        // Update existing folder
         const updatedFolder = await updateFolder(editingFolder.id, folderData, userId, supabaseClient);
         success = !!updatedFolder;
       } else {
-        // Create new folder
         const newFolder = await createFolder({ ...folderData, space_id: spaceId }, userId, supabaseClient);
         success = !!newFolder;
       }
@@ -142,7 +133,6 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
         alert('Ошибка при сохранении папки');
       }
     } catch (error) {
-      console.error('Error saving folder:', error);
       alert('Ошибка при сохранении папки');
     }
   };
@@ -212,6 +202,11 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
             </CardHeader>
             <CardContent>
               <p className="text-sm text-gray-500">Все посты в этом пространстве</p>
+              <div className="flex flex-wrap gap-4 mt-3 text-xs">
+                <div className="text-gray-400">
+                  <span>Постов: {folders.reduce((sum, f) => sum + (f.posts_count || 0), 0)}</span>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -255,7 +250,23 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-gray-500">{folder.description || 'Нет описания'}</p>
-                <p className="text-xs text-gray-400 mt-2">Постов: {folder.posts_count || 0}</p>
+                <div className="flex flex-wrap gap-4 mt-3 text-xs">
+                  <div className="text-gray-400">
+                    <span>Постов: {folder.posts_count || 0}</span>
+                  </div>
+                  {folderStats[folder.id] && (
+                    <>
+                      <div className="flex items-center text-gray-400">
+                        <Heart className="h-3 w-3 mr-1" />
+                        <span>{folderStats[folder.id].likesCount || 0} лайков</span>
+                      </div>
+                      <div className="flex items-center text-gray-400">
+                        <Star className="h-3 w-3 mr-1" />
+                        <span>{folderStats[folder.id].favoritesCount || 0} в избранном</span>
+                      </div>
+                    </>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ))}

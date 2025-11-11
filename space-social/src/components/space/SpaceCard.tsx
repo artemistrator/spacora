@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useSupabaseAuth } from '@/lib/auth'
+import { useUserSubscriptions } from '@/hooks/useUserSubscriptions'
 import { updateSpaceFollowersCount } from '@/lib/counter-utils'
 import { 
   Home, 
@@ -14,7 +15,6 @@ import {
   Users,
   Heart,
   Star,
-  AlertTriangle
 } from 'lucide-react'
 
 interface SpaceCardProps {
@@ -40,65 +40,21 @@ const spaceTypeLabels = {
 
 export function SpaceCard({ space, onClick }: SpaceCardProps) {
   const { getSupabaseWithSession, userId } = useSupabaseAuth()
-  const [isSubscribed, setIsSubscribed] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const { isSubscribedTo, addSubscription, removeSubscription, isLoading: subsLoading } = useUserSubscriptions()
+  const [isLoading, setIsLoading] = useState(false)
   const [followerCount, setFollowerCount] = useState(space.followers_count || 0)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const checkSubscription = async () => {
-      if (!userId) {
-        setIsLoading(false)
-        return
-      }
-      
-      try {
-        const supabaseClient = await getSupabaseWithSession()
-        
-        // Add timeout for the request
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Request timeout')), 10000)
-        )
-        
-        const subscriptionPromise = supabaseClient
-          .from('user_spaces')
-          .select('*')
-          .eq('clerk_id', userId)
-          .eq('space_id', space.id)
-          .maybeSingle() // Changed from .single() to .maybeSingle()
-          
-        // Race the request with timeout
-        const { data, error } = await Promise.race([subscriptionPromise, timeoutPromise]) as any
-          
-        if (data) {
-          setIsSubscribed(true)
-        }
-      } catch (error: any) {
-        console.error('Error checking subscription:', error)
-        
-        // Handle network errors specifically
-        if (error.message === 'Failed to fetch' || error.message === 'Request timeout') {
-          setError('Проблемы с подключением к серверу.')
-        }
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    
-    checkSubscription()
-  }, [userId, space.id, getSupabaseWithSession])
+  
+  const isSubscribed = isSubscribedTo(space.id)
 
   const handleSubscribe = async (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!userId || isLoading) return
+    if (!userId || isLoading || subsLoading) return
     
     try {
       setIsLoading(true)
-      setError(null)
       const supabaseClient = await getSupabaseWithSession()
       
       if (isSubscribed) {
-        // Unsubscribe
         const { error } = await supabaseClient
           .from('user_spaces')
           .delete()
@@ -106,16 +62,12 @@ export function SpaceCard({ space, onClick }: SpaceCardProps) {
           .eq('space_id', space.id)
           
         if (!error) {
-          setIsSubscribed(false)
-          // Update follower count
+          removeSubscription(space.id)
           const newCount = Math.max(0, followerCount - 1)
           setFollowerCount(newCount)
-          
-          // Update space followers count in database
           await updateSpaceFollowersCount(space.id, false)
         }
       } else {
-        // Subscribe
         const { error } = await supabaseClient
           .from('user_spaces')
           .insert({
@@ -125,24 +77,13 @@ export function SpaceCard({ space, onClick }: SpaceCardProps) {
           })
           
         if (!error) {
-          setIsSubscribed(true)
-          // Update follower count
+          addSubscription(space.id)
           const newCount = followerCount + 1
           setFollowerCount(newCount)
-          
-          // Update space followers count in database
           await updateSpaceFollowersCount(space.id, true)
         }
       }
-    } catch (error: any) {
-      console.error('Error toggling subscription:', error)
-      
-      // Handle network errors specifically
-      if (error.message === 'Failed to fetch' || error.message === 'Request timeout') {
-        setError('Проблемы с подключением к серверу.')
-      } else {
-        setError('Ошибка при изменении подписки.')
-      }
+    } catch (error) {
     } finally {
       setIsLoading(false)
     }
@@ -156,12 +97,33 @@ export function SpaceCard({ space, onClick }: SpaceCardProps) {
       className="hover:shadow-md transition-shadow cursor-pointer h-full flex flex-col"
       onClick={onClick}
     >
+      {space.cover_url && (
+        <div className="w-full h-32 overflow-hidden border-b border-gray-200">
+          <img 
+            src={space.cover_url} 
+            alt={space.name}
+            className="w-full h-full object-cover"
+          />
+        </div>
+      )}
+      
       <CardHeader className="pb-2">
         <div className="flex justify-between items-start">
-          <CardTitle className="text-lg line-clamp-2">{space.name}</CardTitle>
-          <div className="flex items-center space-x-1 text-sm text-muted-foreground">
+          <div className="flex items-start space-x-3 flex-1">
+            {space.avatar_url && (
+              <img 
+                src={space.avatar_url} 
+                alt={space.name}
+                className="h-10 w-10 rounded-lg object-cover border border-gray-200 flex-shrink-0"
+              />
+            )}
+            <div className="flex-1 min-w-0">
+              <CardTitle className="text-lg line-clamp-2">{space.name}</CardTitle>
+            </div>
+          </div>
+          <div className="flex items-center space-x-1 text-sm text-muted-foreground flex-shrink-0 ml-2">
             <Users className="h-4 w-4" />
-            <span>{followerCount}</span>
+            <span>{space.followers_count || 0}</span>
           </div>
         </div>
       </CardHeader>
@@ -170,6 +132,18 @@ export function SpaceCard({ space, onClick }: SpaceCardProps) {
           <SpaceTypeIcon className="h-4 w-4 mr-1" />
           <span>{spaceTypeLabel}</span>
         </div>
+        
+        {space.style && (
+          <p className="text-sm text-gray-600 mb-2">
+            Стиль: {space.style}
+          </p>
+        )}
+        
+        {space.area_m2 && (
+          <p className="text-sm text-gray-600 mb-2">
+            Площадь: {space.area_m2} кв.м
+          </p>
+        )}
         
         {space.description && (
           <p className="text-sm text-muted-foreground line-clamp-3 mb-3">
@@ -181,15 +155,6 @@ export function SpaceCard({ space, onClick }: SpaceCardProps) {
           <p className="text-sm text-muted-foreground mb-3">
             📍 {space.location}
           </p>
-        )}
-        
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-md p-2 mb-3">
-            <div className="flex items-center text-red-700">
-              <AlertTriangle className="h-4 w-4 mr-1" />
-              <span className="text-xs">{error}</span>
-            </div>
-          </div>
         )}
         
         <div className="flex justify-between items-center mt-4">
@@ -220,7 +185,7 @@ export function SpaceCard({ space, onClick }: SpaceCardProps) {
                 variant={isSubscribed ? "default" : "outline"} 
                 size="sm"
                 onClick={handleSubscribe}
-                disabled={isLoading}
+                disabled={isLoading || subsLoading}
               >
                 {isSubscribed ? 'Подписан' : 'Подписаться'}
               </Button>

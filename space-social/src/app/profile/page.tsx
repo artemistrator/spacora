@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSupabaseAuth } from '@/lib/auth'
+import { executeSupabaseQuery } from '@/lib/request-manager'
+
 import { SpaceCard } from '@/components/space/SpaceCard'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -39,7 +41,6 @@ export default function ProfilePage() {
         return
       }
 
-      // Prevent infinite retry loop
       if (retryCount >= maxRetries) {
         setError(`Не удалось загрузить пространства после ${maxRetries} попыток. Пожалуйста, обновите страницу.`)
         setLoading(false)
@@ -51,36 +52,27 @@ export default function ProfilePage() {
         setError(null)
         const supabaseClient = await getSupabaseWithSession()
         
-        // Add timeout for the request
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Request timeout')), 10000)
-        )
-        
-        const spacesPromise = supabaseClient
-          .from('spaces')
-          .select('*')
-          .eq('owner_id', userId)
-          .order('created_at', { ascending: false })
+        const data = await executeSupabaseQuery(async () => {
+          const { data, error } = await supabaseClient
+            .from('spaces')
+            .select('*')
+            .eq('owner_id', userId)
+            .order('created_at', { ascending: false })
+          
+          if (error) throw error
+          return data
+        }, 8000)
 
-        // Race the request with timeout
-        const { data, error } = await Promise.race([spacesPromise, timeoutPromise]) as any
-
-        if (error) throw error
         setSpaces(data || [])
       } catch (error: any) {
-        console.error('Error fetching spaces:', error)
-        
-        // Handle network errors specifically
         if (error.message === 'Failed to fetch' || error.message === 'Request timeout') {
           setError('Проблемы с подключением к серверу. Проверьте интернет-соединение.')
-          // Only retry if we haven't exceeded max retries
           if (retryCount < maxRetries) {
-            // Exponential backoff - wait longer between retries
-            const delay = Math.min(1000 * Math.pow(2, retryCount), 10000) // Max 10 seconds
+            const delay = Math.min(1000 * Math.pow(2, retryCount), 10000)
             setTimeout(() => {
               setRetryCount(prev => prev + 1)
             }, delay)
-            return // Don't set loading to false yet, we're retrying
+            return
           }
         } else {
           setError('Не удалось загрузить пространства. Пожалуйста, попробуйте обновить страницу.')
@@ -91,7 +83,7 @@ export default function ProfilePage() {
     }
 
     fetchSpaces()
-  }, [userId, getSupabaseWithSession, retryCount, maxRetries])
+  }, [userId, retryCount, maxRetries])
 
   const handleRetry = () => {
     setRetryCount(0) // Reset retry count when manually retrying

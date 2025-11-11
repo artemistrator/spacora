@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { uploadImage } from '@/lib/upload';
 
@@ -15,6 +15,7 @@ export function ImageUpload({
 }: ImageUploadProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const uniqueId = useMemo(() => `image-upload-${Math.random().toString(36).substring(7)}`, []);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -85,9 +86,9 @@ export function ImageUpload({
           onChange={handleFileChange}
           disabled={isUploading}
           className="hidden"
-          id="image-upload"
+          id={uniqueId}
         />
-        <label htmlFor="image-upload">
+        <label htmlFor={uniqueId}>
           <Button 
             variant="outline" 
             className="w-full"

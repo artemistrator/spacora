@@ -23,24 +23,31 @@ export default function EditSpacePage({ params }: { params: Promise<{ id: string
   const [space, setSpace] = useState<Space | null>(null)
   const [loading, setLoading] = useState(true)
   const [isOwner, setIsOwner] = useState(false)
-
-  // Unwrap the params
-  const unwrappedParams = { id: '' }
+  const [spaceId, setSpaceId] = useState<string | null>(null)
+  const [pageReady, setPageReady] = useState(false)
 
   useEffect(() => {
-    const fetchSpace = async () => {
-      if (!unwrappedParams.id || !userId) {
-        router.push('/')
-        return
-      }
+    const unwrapParams = async () => {
+      const resolvedParams = await params
+      setSpaceId(resolvedParams.id)
+      setPageReady(true)
+    }
+    unwrapParams()
+  }, [params])
 
+  useEffect(() => {
+    if (!pageReady || !spaceId || !userId) {
+      return
+    }
+
+    const fetchSpace = async () => {
       try {
         const supabaseClient = await getSupabaseWithSession()
         const { data: spaceData, error: spaceError } = await supabaseClient
           .from('spaces')
           .select('*')
-          .eq('id', unwrappedParams.id)
-          .maybeSingle() // Changed from .single() to .maybeSingle()
+          .eq('id', spaceId)
+          .maybeSingle()
 
         if (spaceError) throw spaceError
         
@@ -53,25 +60,23 @@ export default function EditSpacePage({ params }: { params: Promise<{ id: string
         setSpace(spaceData)
         
         // Check if user is owner
-        console.log('Checking ownership:', { userId, spaceOwnerId: spaceData.owner_id });
-        if (userId && spaceData.owner_id === userId) {
-          console.log('User is owner, setting isOwner to true');
-          setIsOwner(true);
+        if (spaceData.owner_id === userId) {
+          setIsOwner(true)
         } else {
-          console.log('User is not owner, redirecting');
           // Redirect if user is not owner
-          router.push('/');
+          router.push('/')
+          return
         }
+        
+        setLoading(false)
       } catch (error) {
         console.error('Error fetching space:', error)
         router.push('/')
-      } finally {
-        setLoading(false)
       }
     }
 
     fetchSpace()
-  }, [unwrappedParams.id, userId, getSupabaseWithSession, router])
+  }, [spaceId, userId, pageReady, getSupabaseWithSession, router])
 
   if (loading) {
     return (
@@ -106,7 +111,7 @@ export default function EditSpacePage({ params }: { params: Promise<{ id: string
     <div className="p-4 max-w-2xl mx-auto">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Редактировать пространство</h1>
-        <Button variant="outline" onClick={() => router.push(`/space/${unwrappedParams.id}`)}>
+        <Button variant="outline" onClick={() => router.push(`/space/${spaceId}`)}>
           Отмена
         </Button>
       </div>

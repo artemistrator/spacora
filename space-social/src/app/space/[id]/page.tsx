@@ -8,7 +8,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useSupabaseAuth } from '@/lib/auth'
 import { PostCard } from '@/components/post/PostCard'
 import { FolderList } from '@/components/space/FolderList'
-import { executeSupabaseQuery } from '@/lib/request-manager'
 import { 
   Home, 
   Building, 
@@ -39,6 +38,10 @@ interface Space {
   favorites_count: number
   followers_count: number
   created_at: string
+  avatar_url?: string
+  cover_url?: string
+  style?: string
+  area_m2?: number
 }
 
 interface Post {
@@ -71,7 +74,6 @@ const spaceTypeLabels = {
 }
 
 function SpacePageContent({ id }: { id: string }) {
-  console.log('SpacePageContent rendered with id:', id)
   const router = useRouter()
   const { getSupabaseWithSession, userId } = useSupabaseAuth()
   const [space, setSpace] = useState<Space | null>(null)
@@ -82,137 +84,106 @@ function SpacePageContent({ id }: { id: string }) {
   const [isSubscribed, setIsSubscribed] = useState(false)
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
-  const [maxRetries] = useState(3) // Limit retries to prevent infinite loops
-
-  // Use the id parameter directly
-  const unwrappedParams = { id }
+  const [maxRetries] = useState(2)
 
   useEffect(() => {
-    console.log('SpacePageContent useEffect triggered with id:', id)
+    if (!id || id.length === 0) {
+      setError('ID пространства не указан')
+      setLoading(false)
+      return
+    }
+
+    if (retryCount >= maxRetries) {
+      setError(`Не удалось загрузить данные после ${maxRetries} попыток. Пожалуйста, обновите страницу.`)
+      setLoading(false)
+      return
+    }
+
+    let cancelled = false
+
     const fetchSpaceAndPosts = async () => {
-      console.log('SpacePageContent fetchSpaceAndPosts called with id:', id)
-      if (!id || id.length === 0) {
-        console.log('SpacePageContent: ID is empty or not provided')
-        setError('ID пространства не указан')
-        setLoading(false)
-        return
-      }
-
-      // Prevent infinite retry loop
-      if (retryCount >= maxRetries) {
-        setError(`Не удалось загрузить данные после ${maxRetries} попыток. Пожалуйста, обновите страницу.`)
-        setLoading(false)
-        return
-      }
-
       try {
         setLoading(true)
         setError(null)
         const supabaseClient = await getSupabaseWithSession()
+        if (cancelled) return
         
-        // Fetch space details
-        console.log('SpacePageContent: Fetching space details for id:', unwrappedParams.id);
-        const spaceData = await executeSupabaseQuery(async () => {
-          const { data, error } = await supabaseClient
-            .from('spaces')
-            .select('*')
-            .eq('id', unwrappedParams.id)
-            .single();
-          
-          if (error) throw error;
-          return data;
-        }, 3000);
-        
+        const { data: spaceData, error: spaceError } = await supabaseClient
+          .from('spaces')
+          .select('*')
+          .eq('id', id)
+          .single()
+
+        if (spaceError) throw spaceError
+        if (cancelled) return
+
         setSpace(spaceData)
-        
-        // Small delay before next request
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // Check if user is owner
+
         if (userId && spaceData.owner_id === userId) {
           setIsOwner(true)
         } else if (userId) {
-          // Small delay before next request
-          await new Promise(resolve => setTimeout(resolve, 200));
-          
-          // Check if user is subscribed
-          try {
-            console.log('SpacePageContent: Checking subscription for user:', userId, 'space:', spaceData.id);
-            const subscriptionData = await executeSupabaseQuery(async () => {
-              const { data, error } = await supabaseClient
-                .from('user_spaces')
-                .select('*')
-                .eq('clerk_id', userId)
-                .eq('space_id', spaceData.id)
-                .maybeSingle(); // Changed from .single() to .maybeSingle()
-              
-              if (error) throw error;
-              return data;
-            }, 3000);
-            
-            if (subscriptionData) {
-              setIsSubscribed(true)
-            }
-          } catch (subscriptionError) {
-            console.warn('Error checking subscription:', subscriptionError)
+          const { data: subscriptionData } = await supabaseClient
+            .from('user_spaces')
+            .select('id')
+            .eq('clerk_id', userId)
+            .eq('space_id', spaceData.id)
+            .maybeSingle()
+
+          if (!cancelled && subscriptionData) {
+            setIsSubscribed(true)
           }
         }
-        
-        // Small delay before next request
-        await new Promise(resolve => setTimeout(resolve, 200));
-        
-        // Fetch posts for this space
-        console.log('SpacePageContent: Fetching posts for space:', unwrappedParams.id);
-        const postsData = await executeSupabaseQuery(async () => {
-          let query = supabaseClient
-            .from('posts')
-            .select('*')
-            .eq('space_id', unwrappedParams.id)
-            .order('created_at', { ascending: false });
-            
-          // Filter by folder if selected
-          if (selectedFolderId) {
-            query = query.eq('folder_id', selectedFolderId);
-          } else if (selectedFolderId === null) {
-            // Show posts with no folder when "All posts" is selected
-            query = query.is('folder_id', null);
-          }
-          
-          const { data, error } = await query;
-          if (error) throw error;
-          return data;
-        }, 3000);
 
-        setPosts(postsData || [])
-        console.log('SpacePageContent: Completed fetching data for space:', unwrappedParams.id);
+        if (cancelled) return
+
+        let query = supabaseClient
+          .from('posts')
+          .select('*')
+          .eq('space_id', id)
+          .order('created_at', { ascending: false })
+
+        // If selectedFolderId is a string ID, filter by that folder
+        // If selectedFolderId is undefined (initial state before clicking folders), show all
+        // If selectedFolderId is explicitly null (clicked "All posts"), show all
+        if (selectedFolderId && typeof selectedFolderId === 'string') {
+          query = query.eq('folder_id', selectedFolderId)
+        }
+
+        const { data: postsData, error: postsError } = await query
+
+        if (postsError) throw postsError
+        if (!cancelled) {
+          setPosts(postsData || [])
+        }
       } catch (err: any) {
-        console.error('Error fetching space and posts:', err)
-        
-        // Handle network errors specifically
-        if (err.message === 'Failed to fetch' || err.message === 'Request timeout') {
-          setError('Проблемы с подключением к серверу. Проверьте интернет-соединение и попробуйте снова.')
-          // Only retry if we haven't exceeded max retries
-          if (retryCount < maxRetries) {
-            // Exponential backoff - wait longer between retries
-            const delay = Math.min(1000 * Math.pow(2, retryCount), 5000) // Max 5 seconds
-            console.log('SpacePageContent: Retrying in', delay, 'ms');
-            setTimeout(() => {
-              setRetryCount(prev => prev + 1)
-            }, delay)
-            return // Don't set loading to false yet, we're retrying
+        if (!cancelled) {
+          if (err.message === 'Failed to fetch' || err.message === 'Request timeout') {
+            setError('Проблемы с подключением. Попытка переподключения...')
+            if (retryCount < maxRetries) {
+              const delay = Math.min(1000 * Math.pow(2, retryCount), 5000)
+              setTimeout(() => {
+                setRetryCount(prev => prev + 1)
+              }, delay)
+              return
+            }
+          } else if (err.message) {
+            setError(`Ошибка: ${err.message}`)
+          } else {
+            setError('Не удалось загрузить данные. Пожалуйста, обновите страницу.')
           }
-        } else if (err.message) {
-          setError(`Ошибка загрузки данных: ${err.message}`)
-        } else {
-          setError('Не удалось загрузить данные. Пожалуйста, попробуйте обновить страницу.')
         }
       } finally {
-        setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
     }
 
     fetchSpaceAndPosts()
-  }, [id, userId, getSupabaseWithSession, selectedFolderId, retryCount, maxRetries])
+    return () => {
+      cancelled = true
+    }
+  }, [id, userId, selectedFolderId, retryCount, maxRetries])
 
   const handleRetry = () => {
     // Reset error and trigger reload
@@ -225,23 +196,15 @@ function SpacePageContent({ id }: { id: string }) {
     if (!isOwner || !space) return
 
     try {
-      console.log('Attempting to delete space:', space.id)
-      console.log('User ID for deletion:', userId)
-      
       const supabaseClient = await getSupabaseWithSession()
-      console.log('Supabase client created for deletion')
       
-      // First, let's check if the space exists and if the user is the owner
       const { data: spaceCheck, error: checkError } = await supabaseClient
         .from('spaces')
         .select('id, owner_id')
         .eq('id', space.id)
-        .maybeSingle() // Changed from .single() to .maybeSingle()
+        .maybeSingle()
         
-      console.log('Space check result for deletion:', { spaceCheck, checkError })
-      
       if (checkError) {
-        console.error('Error checking space for deletion:', checkError)
         throw checkError
       }
       
@@ -253,98 +216,54 @@ function SpacePageContent({ id }: { id: string }) {
         throw new Error('User is not the owner of this space for deletion')
       }
       
-      // Delete all related data first to avoid foreign key constraint violations
-      // Delete favorites related to posts in this space
       const { error: favoritesError } = await supabaseClient
         .from('favorites')
         .delete()
         .in('post_id', posts.map(post => post.id))
       
-      if (favoritesError) {
-        console.error('Error deleting favorites:', favoritesError)
-        // Don't throw error here, continue with deletion
-      }
-      
-      // Delete post reactions related to posts in this space
       const { error: reactionsError } = await supabaseClient
         .from('post_reactions')
         .delete()
         .in('post_id', posts.map(post => post.id))
       
-      if (reactionsError) {
-        console.error('Error deleting post reactions:', reactionsError)
-        // Don't throw error here, continue with deletion
-      }
-      
-      // Delete posts in this space
       const { error: postsError } = await supabaseClient
         .from('posts')
         .delete()
         .eq('space_id', space.id)
       
-      if (postsError) {
-        console.error('Error deleting posts:', postsError)
-        // Don't throw error here, continue with deletion
-      }
-      
-      // Delete user space subscriptions
       const { error: userSpacesError } = await supabaseClient
         .from('user_spaces')
         .delete()
         .eq('space_id', space.id)
       
-      if (userSpacesError) {
-        console.error('Error deleting user spaces:', userSpacesError)
-        // Don't throw error here, continue with deletion
-      }
-      
-      // Delete AI replacement jobs
       const { error: aiJobsError } = await supabaseClient
         .from('ai_replacement_jobs')
         .delete()
         .eq('space_id', space.id)
       
-      if (aiJobsError) {
-        console.error('Error deleting AI jobs:', aiJobsError)
-        // Don't throw error here, continue with deletion
-      }
-      
-      // Delete space stats
       const { error: spaceStatsError } = await supabaseClient
         .from('space_stats')
         .delete()
         .eq('space_id', space.id)
       
-      if (spaceStatsError) {
-        console.error('Error deleting space stats:', spaceStatsError)
-        // Don't throw error here, continue with deletion
-      }
-      
-      // Finally, delete the space itself
-      const { error, data } = await supabaseClient
+      const { error } = await supabaseClient
         .from('spaces')
         .delete()
         .eq('id', space.id)
 
-      console.log('Delete result:', { error, data })
-
       if (error) {
-        console.error('Error deleting space:', error)
         throw error
       }
 
-      console.log('Space deleted successfully')
-      // Redirect to profile page
       router.push('/profile')
       router.refresh()
     } catch (error) {
-      console.error('Error deleting space:', error)
       alert('Ошибка при удалении пространства. Пожалуйста, попробуйте снова.')
     }
   }
 
   const handleCreatePost = () => {
-    router.push(`/space/${unwrappedParams.id}/create-post`)
+    router.push(`/space/${id}/create-post`)
   }
 
   if (loading) {
@@ -416,18 +335,43 @@ function SpacePageContent({ id }: { id: string }) {
 
   return (
     <div className="p-4 max-w-6xl mx-auto">
+      {space.cover_url && (
+        <div className="mb-6 rounded-lg overflow-hidden border border-gray-200">
+          <img 
+            src={space.cover_url} 
+            alt="Space cover" 
+            className="w-full h-48 object-cover"
+          />
+        </div>
+      )}
+      
       <div className="mb-6">
         <div className="flex justify-between items-start mb-4">
-          <div>
-            <h1 className="text-2xl font-bold">{space.name}</h1>
-            <div className="flex items-center text-sm text-muted-foreground mt-1">
-              <SpaceTypeIcon className="h-4 w-4 mr-1" />
-              <span>{spaceTypeLabel}</span>
-              {space.location && (
-                <>
-                  <span className="mx-2">•</span>
-                  <span>📍 {space.location}</span>
-                </>
+          <div className="flex items-start space-x-4">
+            {space.avatar_url && (
+              <img 
+                src={space.avatar_url} 
+                alt={space.name}
+                className="h-20 w-20 rounded-lg object-cover border-2 border-gray-200"
+              />
+            )}
+            <div>
+              <h1 className="text-2xl font-bold">{space.name}</h1>
+              <div className="flex items-center text-sm text-muted-foreground mt-1">
+                <SpaceTypeIcon className="h-4 w-4 mr-1" />
+                <span>{spaceTypeLabel}</span>
+                {space.location && (
+                  <>
+                    <span className="mx-2">•</span>
+                    <span>📍 {space.location}</span>
+                  </>
+                )}
+              </div>
+              {space.style && (
+                <p className="text-sm text-gray-600 mt-1">Стиль: {space.style}</p>
+              )}
+              {space.area_m2 && (
+                <p className="text-sm text-gray-600">Площадь: {space.area_m2} кв.м</p>
               )}
             </div>
           </div>
@@ -480,7 +424,7 @@ function SpacePageContent({ id }: { id: string }) {
                 <Plus className="h-4 w-4 mr-2" />
                 Создать пост
               </Button>
-              <Button variant="outline" onClick={() => router.push(`/space/${space.id}/edit`)} className="flex items-center">
+              <Button variant="outline" onClick={() => router.push(`/spaces/${space.id}/edit`)} className="flex items-center">
                 <Edit className="h-4 w-4 mr-2" />
                 Редактировать
               </Button>
@@ -508,6 +452,8 @@ function SpacePageContent({ id }: { id: string }) {
         />
       </div>
       
+      <h2 className="text-2xl font-bold mb-6">Посты</h2>
+      
       {posts.length === 0 ? (
         <div className="text-center py-12">
           <p className="text-gray-500 mb-4">
@@ -528,6 +474,9 @@ function SpacePageContent({ id }: { id: string }) {
               key={post.id} 
               post={post} 
               onClick={() => router.push(`/post/${post.id}`)}
+              onPostDeleted={(postId) => {
+                setPosts(prevPosts => prevPosts.filter(p => p.id !== postId))
+              }}
             />
           ))}
         </div>
@@ -537,17 +486,12 @@ function SpacePageContent({ id }: { id: string }) {
 }
 
 export default function SpacePage({ params }: { params: Promise<{ id: string }> }) {
-  // Unwrap the params promise
   const [unwrappedParams, setUnwrappedParams] = useState({ id: '' })
   
   useEffect(() => {
-    console.log('SpacePage received params:', params)
     params.then(resolvedParams => {
-      console.log('SpacePage resolved params:', resolvedParams)
       setUnwrappedParams(resolvedParams)
-    }).catch(error => {
-      console.error('SpacePage error resolving params:', error)
-    })
+    }).catch(() => {})
   }, [params])
   
   return (

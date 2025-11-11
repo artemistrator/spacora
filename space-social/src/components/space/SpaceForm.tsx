@@ -2,13 +2,16 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useSupabaseAuth } from '@/lib/auth';
+import { ImageUpload } from '@/components/upload/ImageUpload';
 
 export function SpaceForm({ space }: { space?: any }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { getSupabaseWithSession, userId } = useSupabaseAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [name, setName] = useState(space?.name || '');
@@ -16,6 +19,10 @@ export function SpaceForm({ space }: { space?: any }) {
   const [spaceType, setSpaceType] = useState(space?.space_type || 'apartment');
   const [location, setLocation] = useState(space?.location || '');
   const [isPublic, setIsPublic] = useState(space?.is_public ?? true);
+  const [style, setStyle] = useState(space?.style || '');
+  const [areaMm2, setAreaMm2] = useState(space?.area_m2 || '');
+  const [avatarUrl, setAvatarUrl] = useState(space?.avatar_url || '');
+  const [coverUrl, setCoverUrl] = useState(space?.cover_url || '');
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,8 +46,11 @@ export function SpaceForm({ space }: { space?: any }) {
         space_type: spaceType,
         location,
         is_public: isPublic,
+        style: style || null,
+        area_m2: areaMm2 ? parseFloat(areaMm2) : null,
+        avatar_url: avatarUrl || null,
+        cover_url: coverUrl || null,
         updated_at: new Date().toISOString(),
-        // Initialize counters when creating a new space
         followers_count: space ? undefined : 0,
         posts_count: space ? undefined : 0,
         likes_count: space ? undefined : 0,
@@ -88,6 +98,10 @@ export function SpaceForm({ space }: { space?: any }) {
           throw error;
         }
         
+        // Invalidate all related queries
+        await queryClient.invalidateQueries({ queryKey: ['post-card'] });
+        await queryClient.invalidateQueries({ queryKey: ['spaces'] });
+        
         console.log('Update result:', result);
       } else {
         // Create new space
@@ -106,16 +120,24 @@ export function SpaceForm({ space }: { space?: any }) {
           throw error;
         }
         
+        // Invalidate spaces query for new spaces
+        await queryClient.invalidateQueries({ queryKey: ['spaces'] });
+        
         console.log('Insert result:', result);
       }
 
       // Redirect to spaces list or newly created space
-      router.push('/');
-      router.refresh();
+      try {
+        router.push('/');
+        router.refresh();
+      } catch (redirectError) {
+        console.log('Redirect handled', redirectError);
+        window.location.href = '/';
+      }
     } catch (error: any) {
       console.error('Error saving space:', error);
-      // Покажем более подробное сообщение об ошибке
-      alert(`Ошибка при сохранении пространства: ${error.message}. Пожалуйста, попробуйте снова.`);
+      const errorMessage = error?.message || 'Неизвестная ошибка при сохранении пространства';
+      alert(`Ошибка при сохранении пространства: ${errorMessage}. Пожалуйста, попробуйте снова.`);
     } finally {
       setIsSubmitting(false);
     }
@@ -206,6 +228,90 @@ export function SpaceForm({ space }: { space?: any }) {
       <p className="text-sm text-muted-foreground ml-6">
         Сделать пространство видимым для всех пользователей.
       </p>
+
+      <div>
+        <label htmlFor="style" className="block text-sm font-medium mb-1">
+          Стиль пространства
+        </label>
+        <Input
+          id="style"
+          placeholder="Например: Скандинавский, Минимализм, Лофт"
+          value={style}
+          onChange={(e) => setStyle(e.target.value)}
+        />
+        <p className="text-sm text-muted-foreground mt-1">
+          Опишите стиль вашего пространства.
+        </p>
+      </div>
+
+      <div>
+        <label htmlFor="area_m2" className="block text-sm font-medium mb-1">
+          Площадь (кв.м)
+        </label>
+        <Input
+          id="area_m2"
+          placeholder="Например: 45.5"
+          type="number"
+          step="0.01"
+          value={areaMm2}
+          onChange={(e) => setAreaMm2(e.target.value)}
+        />
+        <p className="text-sm text-muted-foreground mt-1">
+          Укажите площадь вашего пространства в квадратных метрах.
+        </p>
+      </div>
+
+      <div>
+        <label htmlFor="avatar" className="block text-sm font-medium mb-1">
+          Аватарка пространства
+        </label>
+        {avatarUrl && (
+          <div className="mb-3">
+            <img src={avatarUrl} alt="Avatar" className="h-20 w-20 rounded-lg object-cover border border-gray-200" />
+            <button
+              type="button"
+              onClick={() => setAvatarUrl('')}
+              className="mt-2 text-sm text-red-600 hover:text-red-800"
+            >
+              Удалить
+            </button>
+          </div>
+        )}
+        <ImageUpload 
+          onUploadComplete={(url) => setAvatarUrl(url)} 
+          maxFiles={1}
+          bucket="post-images"
+        />
+        <p className="text-sm text-muted-foreground mt-1">
+          Загрузите аватарку для вашего пространства.
+        </p>
+      </div>
+
+      <div>
+        <label htmlFor="cover" className="block text-sm font-medium mb-1">
+          Обложка пространства
+        </label>
+        {coverUrl && (
+          <div className="mb-3">
+            <img src={coverUrl} alt="Cover" className="h-32 w-full rounded-lg object-cover border border-gray-200" />
+            <button
+              type="button"
+              onClick={() => setCoverUrl('')}
+              className="mt-2 text-sm text-red-600 hover:text-red-800"
+            >
+              Удалить
+            </button>
+          </div>
+        )}
+        <ImageUpload 
+          onUploadComplete={(url) => setCoverUrl(url)} 
+          maxFiles={1}
+          bucket="post-images"
+        />
+        <p className="text-sm text-muted-foreground mt-1">
+          Загрузите обложку для вашего пространства.
+        </p>
+      </div>
 
       <Button type="submit" disabled={isSubmitting}>
         {isSubmitting ? 'Сохранение...' : space ? 'Обновить' : 'Создать'}
