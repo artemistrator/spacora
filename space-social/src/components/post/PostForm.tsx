@@ -24,6 +24,7 @@ export function PostForm({ post, spaceId }: { post?: any; spaceId?: string }) {
   const [folders, setFolders] = useState<any[]>([]);
   const [loadingFolders, setLoadingFolders] = useState(false);
   const [hashtags, setHashtags] = useState(post?.hashtags?.join(' ') || '');
+  const [isOwner, setIsOwner] = useState(false);
 
   const handleImageUpload = (url: string) => {
     setImages(prev => [...prev, url]);
@@ -37,6 +38,7 @@ export function PostForm({ post, spaceId }: { post?: any; spaceId?: string }) {
   useEffect(() => {
     if (spaceId) {
       loadFolders();
+      checkOwnership();
     }
   }, [spaceId]);
 
@@ -52,6 +54,25 @@ export function PostForm({ post, spaceId }: { post?: any; spaceId?: string }) {
       console.error('Error loading folders:', error);
     } finally {
       setLoadingFolders(false);
+    }
+  };
+
+  const checkOwnership = async () => {
+    if (!spaceId || !userId) return;
+    
+    try {
+      const supabaseClient = await getSupabaseWithSession();
+      const { data: spaceData, error } = await supabaseClient
+        .from('spaces')
+        .select('owner_id')
+        .eq('id', spaceId)
+        .maybeSingle();
+      
+      if (!error && spaceData) {
+        setIsOwner(spaceData.owner_id === userId);
+      }
+    } catch (error) {
+      console.error('Error checking ownership:', error);
     }
   };
 
@@ -213,25 +234,27 @@ export function PostForm({ post, spaceId }: { post?: any; spaceId?: string }) {
         </select>
       </div>
 
-      <div>
-        <label htmlFor="folder_id" className="block text-sm font-medium mb-1">
-          Папка
-        </label>
-        <Select value={folderId || undefined} onValueChange={setFolderId}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Выберите папку" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">Без папки</SelectItem>
-            {folders.map((folder) => (
-              <SelectItem key={folder.id} value={folder.id}>
-                {folder.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {loadingFolders && <p className="text-sm text-muted-foreground mt-1">Загрузка папок...</p>}
-      </div>
+      {isOwner && (
+        <div>
+          <label htmlFor="folder_id" className="block text-sm font-medium mb-1">
+            Папка
+          </label>
+          <Select value={folderId || undefined} onValueChange={setFolderId}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Выберите папку" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Без папки</SelectItem>
+              {folders.map((folder) => (
+                <SelectItem key={folder.id} value={folder.id}>
+                  {folder.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {loadingFolders && <p className="text-sm text-muted-foreground mt-1">Загрузка папок...</p>}
+        </div>
+      )}
 
       <div>
         <label htmlFor="style_tags" className="block text-sm font-medium mb-1">

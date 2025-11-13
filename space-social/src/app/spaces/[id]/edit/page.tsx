@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSupabaseAuth } from '@/lib/auth'
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping'
 import { SpaceForm } from '@/components/space/SpaceForm'
 
 interface Space {
@@ -59,11 +60,18 @@ export default function EditSpacePage({ params }: { params: Promise<{ id: string
         
         setSpace(spaceData)
         
-        // Check if user is owner
-        if (spaceData.owner_id === userId) {
-          setIsOwner(true)
+        // Check if user is owner with both ID formats
+        if (userId) {
+          const supabaseUserId = await getOrCreateSupabaseUserId(userId);
+          if (spaceData.owner_id === userId || spaceData.owner_id === supabaseUserId) {
+            setIsOwner(true)
+          } else {
+            // Redirect if user is not owner
+            router.push('/')
+            return
+          }
         } else {
-          // Redirect if user is not owner
+          // Redirect if user is not authenticated
           router.push('/')
           return
         }

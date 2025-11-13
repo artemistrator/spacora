@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSupabaseAuth } from '@/lib/auth'
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping'
 import { PostCard } from '@/components/post/PostCard'
 import { FolderList } from '@/components/space/FolderList'
 import { 
@@ -119,18 +120,22 @@ function SpacePageContent({ id }: { id: string }) {
 
         setSpace(spaceData)
 
-        if (userId && spaceData.owner_id === userId) {
-          setIsOwner(true)
-        } else if (userId) {
-          const { data: subscriptionData } = await supabaseClient
-            .from('user_spaces')
-            .select('id')
-            .eq('clerk_id', userId)
-            .eq('space_id', spaceData.id)
-            .maybeSingle()
+        // Проверяем права владельца с учетом обоих форматов ID
+        if (userId) {
+          const supabaseUserId = await getOrCreateSupabaseUserId(userId);
+          if (spaceData.owner_id === userId || spaceData.owner_id === supabaseUserId) {
+            setIsOwner(true)
+          } else {
+            const { data: subscriptionData } = await supabaseClient
+              .from('user_spaces')
+              .select('id')
+              .eq('clerk_id', userId)
+              .eq('space_id', spaceData.id)
+              .maybeSingle()
 
-          if (!cancelled && subscriptionData) {
-            setIsSubscribed(true)
+            if (!cancelled && subscriptionData) {
+              setIsSubscribed(true)
+            }
           }
         }
 
@@ -192,6 +197,10 @@ function SpacePageContent({ id }: { id: string }) {
     setRetryCount(prev => prev + 1)
   }
 
+  const handleCreatePost = () => {
+    router.push(`/space/${id}/create-post`)
+  }
+
   const handleDeleteSpace = async () => {
     if (!isOwner || !space) return
 
@@ -212,8 +221,14 @@ function SpacePageContent({ id }: { id: string }) {
         throw new Error('Space not found for deletion')
       }
       
-      if (spaceCheck.owner_id !== userId) {
-        throw new Error('User is not the owner of this space for deletion')
+      // Проверяем права владельца с учетом обоих форматов ID
+      if (userId) {
+        const supabaseUserId = await getOrCreateSupabaseUserId(userId);
+        if (spaceCheck.owner_id !== userId && spaceCheck.owner_id !== supabaseUserId) {
+          throw new Error('User is not the owner of this space for deletion')
+        }
+      } else {
+        throw new Error('User not authenticated for deletion')
       }
       
       const { error: favoritesError } = await supabaseClient
@@ -260,10 +275,6 @@ function SpacePageContent({ id }: { id: string }) {
     } catch (error) {
       alert('Ошибка при удалении пространства. Пожалуйста, попробуйте снова.')
     }
-  }
-
-  const handleCreatePost = () => {
-    router.push(`/space/${id}/create-post`)
   }
 
   if (loading) {
@@ -418,7 +429,7 @@ function SpacePageContent({ id }: { id: string }) {
         </div>
         
         <div className="flex flex-wrap gap-2 mt-4">
-          {userId && space.owner_id === userId && (
+          {isOwner && (
             <>
               <Button onClick={handleCreatePost} className="flex items-center">
                 <Plus className="h-4 w-4 mr-2" />
@@ -433,13 +444,6 @@ function SpacePageContent({ id }: { id: string }) {
                 Удалить
               </Button>
             </>
-          )}
-          
-          {userId && space.owner_id !== userId && (
-            <Button onClick={handleCreatePost} className="flex items-center">
-              <Plus className="h-4 w-4 mr-2" />
-              Создать пост
-            </Button>
           )}
         </div>
       </div>

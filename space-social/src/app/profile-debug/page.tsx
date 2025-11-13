@@ -7,6 +7,7 @@ import { SpaceCard } from '@/components/space/SpaceCard';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AlertTriangle, WifiOff, RefreshCw } from 'lucide-react';
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping';
 
 interface Space {
   id: string;
@@ -46,10 +47,17 @@ export default function ProfileDebugPage() {
         setError(null);
         const supabaseClient = await getSupabaseWithSession();
         
+        // Получаем правильный UUID для пользователя
+        const supabaseUserId = await getOrCreateSupabaseUserId(userId);
+        
+        if (!supabaseUserId) {
+          throw new Error('Failed to get Supabase user ID')
+        }
+        
         console.log('Got Supabase client, starting request');
         
         // Log the exact query we're making
-        console.log('Executing query: SELECT * FROM spaces WHERE owner_id =', userId, 'ORDER BY created_at DESC');
+        console.log('Executing query: SELECT * FROM spaces WHERE owner_id =', userId, 'OR owner_id =', supabaseUserId);
         
         // Add detailed timeout with logging
         const startTime = Date.now();
@@ -64,7 +72,7 @@ export default function ProfileDebugPage() {
         const spacesPromise = supabaseClient
           .from('spaces')
           .select('*')
-          .eq('owner_id', userId)
+          .or(`owner_id.eq.${userId},owner_id.eq.${supabaseUserId}`) // Ищем по обоим форматам
           .order('created_at', { ascending: false })
           .then(result => {
             const elapsed = Date.now() - startTime;
@@ -83,6 +91,7 @@ export default function ProfileDebugPage() {
         console.log('Query successful, data length:', data?.length);
         setDebugInfo({
           userId,
+          supabaseUserId,
           dataLength: data?.length,
           timestamp: new Date().toISOString()
         });

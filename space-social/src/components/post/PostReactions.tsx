@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSupabaseAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { sendPostReactionNotification } from '@/lib/notifications';
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping';
 import { Button } from '@/components/ui/button';
 
 interface PostReaction {
@@ -53,10 +54,14 @@ export function PostReactions({
     
     try {
       const supabaseClient = await getSupabaseWithSession(); // Используем аутентифицированный клиент
+      
+      // Получаем правильный UUID для пользователя
+      const supabaseUserId = await getOrCreateSupabaseUserId(userId);
+      
       const { data, error } = await supabaseClient
         .from('spaces')
         .select('id')
-        .eq('owner_id', userId) // Clerk user ID
+        .eq('owner_id', supabaseUserId) // Используем правильный UUID вместо Clerk ID
         .limit(1);
 
       if (error) {

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { PostCard } from '@/components/post/PostCard';
 import { supabase } from '@/lib/supabase';
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping';
 
 export default function FavoritesPage() {
   const { userId } = useAuth();
@@ -60,11 +61,14 @@ export default function FavoritesPage() {
     if (!clerkUserId) return [];
     
     try {
+      // Получаем правильный UUID для пользователя
+      const supabaseUserId = await getOrCreateSupabaseUserId(clerkUserId);
+      
       // Get spaces the user owns
       const { data: ownedSpaces, error: ownedSpacesError } = await supabase
         .from('spaces')
         .select('id')
-        .eq('owner_id', clerkUserId);
+        .or(`owner_id.eq.${clerkUserId},owner_id.eq.${supabaseUserId}`); // Ищем по обоим форматам
         
       if (ownedSpacesError) {
         console.error('Error fetching owned spaces:', ownedSpacesError);

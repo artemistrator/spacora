@@ -3,10 +3,11 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { useSupabaseAuth } from '@/lib/auth';
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping';
+import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 interface Comment {
@@ -94,10 +95,13 @@ export function CommentSection({ postId }: { postId: string }) {
       let actingSpaceId = null
       
       // First, check if user owns any space
+      // Получаем правильный UUID для пользователя
+      const supabaseUserId = await getOrCreateSupabaseUserId(userId);
+      
       const { data: anyOwnedSpace, error: anyOwnedSpaceError } = await supabaseClient
         .from('spaces')
         .select('id')
-        .eq('owner_id', userId)
+        .eq('owner_id', supabaseUserId) // Используем правильный UUID вместо Clerk ID
         .limit(1)
         .maybeSingle()
         

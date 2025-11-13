@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping';
 
 interface ProfileStatsProps {
   userId: string;
@@ -22,11 +23,14 @@ export function ProfileStats({ userId }: ProfileStatsProps) {
 
   const fetchStats = async () => {
     try {
+      // Получаем правильный UUID для пользователя
+      const supabaseUserId = await getOrCreateSupabaseUserId(userId);
+      
       // Количество пространств
       const { count: spacesCount, error: spacesError } = await supabase
         .from('spaces')
         .select('*', { count: 'exact', head: true })
-        .eq('owner_id', userId);
+        .or(`owner_id.eq.${userId},owner_id.eq.${supabaseUserId}`); // Ищем по обоим форматам
 
       if (spacesError) throw spacesError;
 
@@ -34,7 +38,7 @@ export function ProfileStats({ userId }: ProfileStatsProps) {
       const { data: spacesData, error: spacesDataError } = await supabase
         .from('spaces')
         .select('id')
-        .eq('owner_id', userId);
+        .or(`owner_id.eq.${userId},owner_id.eq.${supabaseUserId}`); // Ищем по обоим форматам
 
       if (spacesDataError) throw spacesDataError;
 

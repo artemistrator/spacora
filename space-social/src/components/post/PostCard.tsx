@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useSupabaseAuth } from '@/lib/auth'
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping'
+import { supabase } from '@/lib/supabase'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Heart, MessageCircle, Share2, Users, Star, Folder, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react'
-import { useSupabaseAuth } from '@/lib/auth'
-import { updateSpaceFollowersCount, updatePostLikesCount, toggleFavorite } from '@/lib/counter-utils'
+import { AlertTriangle, RefreshCw, Heart, MessageCircle, Users, Folder, Share2, Star, Trash2 } from 'lucide-react'
+import { toggleFavorite, updateSpaceFollowersCount, updatePostLikesCount } from '@/lib/counter-utils'
 import { usePostCardData } from '@/hooks/usePostCardData'
 import styles from './PostCard.module.css'
 
@@ -175,11 +177,14 @@ export function PostCard({ post, onClick, isFavoritesPage = false, onRemoveFromF
 
     try {
       const supabaseClient = await getSupabaseWithSession()
+      
+      // Получаем правильный UUID для пользователя
+      const supabaseUserId = await getOrCreateSupabaseUserId(userId)
 
       const { data: ownedSpace } = await supabaseClient
         .from('spaces')
         .select('id')
-        .eq('owner_id', userId)
+        .eq('owner_id', supabaseUserId) // Используем правильный UUID вместо Clerk ID
         .limit(1)
         .maybeSingle()
 
@@ -350,7 +355,7 @@ export function PostCard({ post, onClick, isFavoritesPage = false, onRemoveFromF
 
         {cardData.hashtags && cardData.hashtags.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-3">
-            {cardData.hashtags.map((hashtag, index) => (
+            {cardData.hashtags.map((hashtag: string, index: number) => (
               <span key={index} className="inline-block text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-full hover:bg-blue-100 transition-colors">
                 #{hashtag}
               </span>
@@ -449,7 +454,7 @@ export function PostCard({ post, onClick, isFavoritesPage = false, onRemoveFromF
           <div className="flex space-x-2">
             <Input
               value={commentText}
-              onChange={(e) => setCommentText(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCommentText(e.target.value)}
               placeholder="Напишите комментарий..."
               className="flex-1 h-10 text-sm rounded-lg border-gray-200"
             />

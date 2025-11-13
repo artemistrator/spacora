@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSupabaseAuth } from '@/lib/auth'
 import { executeSupabaseQuery } from '@/lib/request-manager'
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping'
 
 import { SpaceCard } from '@/components/space/SpaceCard'
 import { Button } from '@/components/ui/button'
@@ -52,11 +53,19 @@ export default function ProfilePage() {
         setError(null)
         const supabaseClient = await getSupabaseWithSession()
         
+        // Получаем правильный UUID для пользователя
+        const supabaseUserId = await getOrCreateSupabaseUserId(userId)
+        
+        if (!supabaseUserId) {
+          throw new Error('Failed to get Supabase user ID')
+        }
+        
         const data = await executeSupabaseQuery(async () => {
+          // Запрашиваем пространства как со старым форматом (Clerk ID), так и с новым (Supabase UUID)
           const { data, error } = await supabaseClient
             .from('spaces')
             .select('*')
-            .eq('owner_id', userId)
+            .or(`owner_id.eq.${userId},owner_id.eq.${supabaseUserId}`) // Ищем по обоим форматам
             .order('created_at', { ascending: false })
           
           if (error) throw error

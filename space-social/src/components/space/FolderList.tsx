@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Folder as FolderIcon, Plus, Edit, Trash2, AlertTriangle, RefreshCw, Heart, Star } from 'lucide-react';
 import { useSupabaseAuth } from '@/lib/auth';
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping';
 import { Folder, getFoldersBySpaceId, createFolder, updateFolder, deleteFolder, getFolderStats, FolderStats } from '@/lib/folder-utils';
 import { FolderModal } from '@/components/space/FolderModal';
 
@@ -69,7 +70,18 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
         .select('owner_id')
         .eq('id', spaceId)
         .maybeSingle();
+      
+      if (!error && spaceData) {
+        // Проверяем права владельца с учетом обоих форматов ID
+        if (userId) {
+          const supabaseUserId = await getOrCreateSupabaseUserId(userId);
+          setIsOwner(spaceData.owner_id === userId || spaceData.owner_id === supabaseUserId);
+        } else {
+          setIsOwner(false);
+        }
+      }
     } catch (error) {
+      console.error('Error checking ownership:', error);
     }
   };
 
@@ -166,10 +178,12 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold">Папки</h2>
-        <Button onClick={handleCreateFolder} className="flex items-center">
-          <Plus className="h-4 w-4 mr-2" />
-          Создать папку
-        </Button>
+        {isOwner && (
+          <Button onClick={handleCreateFolder} className="flex items-center">
+            <Plus className="h-4 w-4 mr-2" />
+            Создать папку
+          </Button>
+        )}
       </div>
 
       {folders.length === 0 ? (
@@ -179,10 +193,12 @@ export function FolderList({ spaceId, onFolderSelect, selectedFolderId }: Folder
           </CardHeader>
           <CardContent>
             <p className="text-gray-500 mb-4">У вас пока нет папок в этом пространстве.</p>
-            <Button onClick={handleCreateFolder} className="flex items-center">
-              <Plus className="h-4 w-4 mr-2" />
-              Создать первую папку
-            </Button>
+            {isOwner && (
+              <Button onClick={handleCreateFolder} className="flex items-center">
+                <Plus className="h-4 w-4 mr-2" />
+                Создать первую папку
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (

@@ -28,14 +28,69 @@ export async function POST(request: Request) {
     // Parse the request body
     const body = await request.json();
     
+    // Подготавливаем данные для вставки, исключая поля, которых может не быть в схеме
+    const { 
+      name, 
+      description, 
+      space_type, 
+      location, 
+      is_public, 
+      style, 
+      area_m2, 
+      avatar_url, 
+      cover_url,
+      ...rest 
+    } = body;
+    
+    // Получаем правильный UUID для пользователя
+    const { data: userIdentity, error: identityError } = await supabase
+      .from('user_identities')
+      .select('supabase_id')
+      .eq('clerk_id', userId)
+      .maybeSingle();
+    
+    if (identityError) {
+      console.error('Error fetching user identity:', identityError);
+      return NextResponse.json({ error: 'Failed to get user identity' }, { status: 500 });
+    }
+    
+    // Если маппинга нет, создаем его
+    let supabaseUserId = userIdentity?.supabase_id;
+    if (!supabaseUserId) {
+      const newSupabaseId = crypto.randomUUID();
+      const { error: insertError } = await supabase
+        .from('user_identities')
+        .insert({
+          clerk_id: userId,
+          supabase_id: newSupabaseId
+        });
+      
+      if (insertError) {
+        console.error('Error creating user identity:', insertError);
+        return NextResponse.json({ error: 'Failed to create user identity' }, { status: 500 });
+      }
+      
+      supabaseUserId = newSupabaseId;
+    }
+    
+    const spaceData = {
+      name,
+      description,
+      space_type,
+      location,
+      is_public,
+      style: style || null,
+      area_m2: area_m2 ? parseFloat(area_m2) : null,
+      avatar_url: avatar_url || null,
+      cover_url: cover_url || null,
+      owner_id: supabaseUserId, // Используем правильный UUID
+      updated_at: new Date().toISOString()
+    };
+    
     // Create the space
     const { data, error } = await supabase
       .from('spaces')
-      .insert({
-        ...body,
-        owner_id: userId,
-        updated_at: new Date().toISOString()
-      })
+      .insert(spaceData)
       .select();
     
     if (error) {

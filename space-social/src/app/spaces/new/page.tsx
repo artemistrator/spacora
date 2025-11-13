@@ -4,10 +4,26 @@ import { useSupabaseAuth } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { SpaceForm } from '@/components/space/SpaceForm'
+import { useSearchParams } from 'next/navigation'
+import { useState, useEffect } from 'react'
 
 export default function NewSpacePage() {
   const { userId } = useSupabaseAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const [showSuccess, setShowSuccess] = useState(false)
+
+  // Проверяем, есть ли параметр success в URL
+  useEffect(() => {
+    if (searchParams?.get('success') === 'true') {
+      setShowSuccess(true)
+      // Убираем параметр из URL через 3 секунды
+      const timer = setTimeout(() => {
+        setShowSuccess(false)
+      }, 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [searchParams])
 
   if (!userId) {
     // Redirect if user is not authenticated
@@ -23,6 +39,12 @@ export default function NewSpacePage() {
           Отмена
         </Button>
       </div>
+      
+      {showSuccess && (
+        <div className="mb-4 p-3 bg-green-100 text-green-800 rounded-md">
+          Пространство успешно создано!
+        </div>
+      )}
       
       <SpaceForm />
     </div>

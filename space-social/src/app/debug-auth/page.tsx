@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react'
 import { useSupabaseAuth } from '@/lib/auth'
 import { useAuth as useClerkAuth } from '@clerk/nextjs'
-import { Button } from '@/components/ui/button'
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 
 export default function DebugAuthPage() {
   const { getSupabaseWithSession, userId, session } = useSupabaseAuth()
@@ -14,25 +15,19 @@ export default function DebugAuthPage() {
   const [error, setError] = useState<string | null>(null)
 
   const testAuth = async () => {
-    setLoading(true)
-    setError(null)
-    
     try {
-      // Get Supabase client
+      setLoading(true)
+      setError(null)
       const supabaseClient = await getSupabaseWithSession()
-      
-      // Test Supabase auth status
-      const { data: { session: supabaseSession } } = await supabaseClient.auth.getSession()
       
       // Test fetching user data
       let userData = null
       let userError = null
-      if (userId) {
+      if (supabaseClient) {
         const { data, error } = await supabaseClient
           .from('user_identities')
           .select('*')
-          .eq('clerk_id', userId)
-          .single()
+          .limit(1)
         
         userData = data
         userError = error
@@ -41,11 +36,14 @@ export default function DebugAuthPage() {
       // Test fetching spaces
       let spacesData = null
       let spacesError = null
-      if (userId) {
+      if (supabaseClient && userId) {
+        // Получаем правильный UUID для пользователя
+        const supabaseUserId = await getOrCreateSupabaseUserId(userId)
+        
         const { data, error } = await supabaseClient
           .from('spaces')
           .select('id, name, owner_id')
-          .eq('owner_id', userId)
+          .or(`owner_id.eq.${userId},owner_id.eq.${supabaseUserId}`) // Ищем по обоим форматам
           .limit(3)
         
         spacesData = data
@@ -60,7 +58,7 @@ export default function DebugAuthPage() {
           orgRole
         },
         supabase: {
-          session: supabaseSession,
+          session: session,
           userData,
           userError: userError?.message,
           spacesData,

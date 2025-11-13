@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useSupabaseAuth } from '@/lib/auth';
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping';
 import { ImageUpload } from '@/components/upload/ImageUpload';
 
 export function SpaceForm({ space }: { space?: any }) {
@@ -40,25 +41,30 @@ export function SpaceForm({ space }: { space?: any }) {
       const supabaseClient = await getSupabaseWithSession();
       console.log('Supabase client created');
       
-      const data = {
-        name,
-        description,
-        space_type: spaceType,
-        location,
-        is_public: isPublic,
-        style: style || null,
-        area_m2: areaMm2 ? parseFloat(areaMm2) : null,
-        avatar_url: avatarUrl || null,
-        cover_url: coverUrl || null,
-        updated_at: new Date().toISOString(),
-        followers_count: space ? undefined : 0,
-        posts_count: space ? undefined : 0,
-        likes_count: space ? undefined : 0,
-        favorites_count: space ? undefined : 0,
-      };
-
+      // Получаем правильный UUID для пользователя
+      const supabaseUserId = await getOrCreateSupabaseUserId(userId);
+      
+      if (!supabaseUserId) {
+        throw new Error('Failed to get Supabase user ID');
+      }
+      
+      console.log('Supabase User ID:', supabaseUserId);
+      
       if (space) {
         // Update existing space
+        const data = {
+          name,
+          description,
+          space_type: spaceType,
+          location,
+          is_public: isPublic,
+          style: style || null,
+          area_m2: areaMm2 ? parseFloat(areaMm2) : null,
+          avatar_url: avatarUrl || null,
+          cover_url: coverUrl || null,
+          updated_at: new Date().toISOString(),
+        };
+        
         console.log('Updating space with data:', { ...data, id: space.id });
         console.log('User ID for update:', userId);
         
@@ -80,7 +86,7 @@ export function SpaceForm({ space }: { space?: any }) {
           throw new Error('Space not found');
         }
         
-        if (spaceCheck.owner_id !== userId) {
+        if (spaceCheck.owner_id !== supabaseUserId) {
           throw new Error('User is not the owner of this space');
         }
         
@@ -106,13 +112,24 @@ export function SpaceForm({ space }: { space?: any }) {
       } else {
         // Create new space
         // The database trigger will automatically create the user if needed
-        console.log('Creating space with data:', { ...data, owner_id: userId });
+        const data = {
+          name,
+          description,
+          space_type: spaceType,
+          location,
+          is_public: isPublic,
+          style: style || null,
+          area_m2: areaMm2 ? parseFloat(areaMm2) : null,
+          avatar_url: avatarUrl || null,
+          cover_url: coverUrl || null,
+          updated_at: new Date().toISOString(),
+          owner_id: supabaseUserId, // Use the Supabase UUID
+        };
+        
+        console.log('Creating space with data:', data);
         const { data: result, error } = await supabaseClient
           .from('spaces')
-          .insert({
-            ...data,
-            owner_id: userId, // Use the Clerk user ID directly
-          })
+          .insert(data)
           .select();
 
         if (error) {
@@ -123,10 +140,25 @@ export function SpaceForm({ space }: { space?: any }) {
         // Invalidate spaces query for new spaces
         await queryClient.invalidateQueries({ queryKey: ['spaces'] });
         
+        // Also invalidate the user's spaces query to ensure profile page updates
+        await queryClient.invalidateQueries({ queryKey: ['user-spaces', supabaseUserId] });
+        
         console.log('Insert result:', result);
+        
+        // После успешного создания пространства переходим на страницу просмотра созданного пространства
+        if (result && result[0]) {
+          try {
+            router.push(`/space/${result[0].id}`);
+            router.refresh();
+          } catch (redirectError) {
+            console.log('Redirect handled', redirectError);
+            window.location.href = `/space/${result[0].id}`;
+          }
+          return; // Выходим из функции, чтобы не выполнять редирект внизу
+        }
       }
 
-      // Redirect to spaces list or newly created space
+      // Для обновления существующего пространства возвращаемся на главную
       try {
         router.push('/');
         router.refresh();

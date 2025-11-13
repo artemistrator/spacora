@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSupabaseAuth } from '@/lib/auth'
-import { Button } from '@/components/ui/button'
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { AlertTriangle, CheckCircle, XCircle } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { XCircle, CheckCircle, AlertTriangle } from 'lucide-react'
 
 interface TestResult {
   name: string
@@ -196,10 +197,13 @@ export default function DebugPoliciesPage() {
       
       if (userId) {
         try {
+          // Получаем правильный UUID для пользователя
+          const supabaseUserId = await getOrCreateSupabaseUserId(userId)
+          
           const { data, error } = await supabaseClient
             .from('spaces')
             .select('id, name')
-            .eq('owner_id', userId)
+            .or(`owner_id.eq.${userId},owner_id.eq.${supabaseUserId}`) // Ищем по обоим форматам
             
           test5.status = error ? 'failed' : 'success'
           test5.result = `Found ${Array.isArray(data) ? data.length : 0} owned spaces`

@@ -39,9 +39,35 @@ export function InfiniteFeed() {
     try {
       const supabaseClient = await getSupabaseWithSession()
       
+      // Получаем список пространств, на которые подписан пользователь
+      let spaceIds: string[] = []
+      if (userId) {
+        const { data: userSpaces } = await supabaseClient
+          .from('user_spaces')
+          .select('space_id')
+          .eq('clerk_id', userId)
+        
+        spaceIds = userSpaces?.map(s => s.space_id) || []
+      }
+      
+      // Получаем список публичных пространств
+      const { data: publicSpaces } = await supabaseClient
+        .from('spaces')
+        .select('id')
+        .eq('is_public', true)
+      
+      const publicSpaceIds = publicSpaces?.map(s => s.id) || []
+      
+      // Объединяем списки
+      const allowedSpaceIds = [...new Set([...spaceIds, ...publicSpaceIds])]
+      
+      // Если нет доступных пространств, показываем только посты из публичных
+      const finalSpaceIds = allowedSpaceIds.length > 0 ? allowedSpaceIds : publicSpaceIds
+      
       const { data, error } = await supabaseClient
         .from('posts')
         .select('*')
+        .in('space_id', finalSpaceIds)
         .order('created_at', { ascending: false })
         .range(page * 10, (page + 1) * 10 - 1)
 
@@ -57,7 +83,7 @@ export function InfiniteFeed() {
     } finally {
       setLoading(false)
     }
-  }, [page, loading])
+  }, [page, loading, userId])
 
   // Only run initial fetch once
   useEffect(() => {
@@ -73,6 +99,25 @@ export function InfiniteFeed() {
     const setupSubscription = async () => {
       const supabaseClient = await getSupabaseWithSession()
       
+      // Получаем список пространств, на которые подписан пользователь
+      const { data: userSpaces } = await supabaseClient
+        .from('user_spaces')
+        .select('space_id')
+        .eq('clerk_id', userId)
+      
+      const spaceIds = userSpaces?.map(s => s.space_id) || []
+      
+      // Получаем список публичных пространств
+      const { data: publicSpaces } = await supabaseClient
+        .from('spaces')
+        .select('id')
+        .eq('is_public', true)
+      
+      const publicSpaceIds = publicSpaces?.map(s => s.id) || []
+      
+      // Объединяем списки
+      const allowedSpaceIds = [...new Set([...spaceIds, ...publicSpaceIds])]
+      
       const newChannel = supabaseClient
         .channel('public:posts')
         .on(
@@ -81,32 +126,8 @@ export function InfiniteFeed() {
           async (payload) => {
             const postSpaceId = payload.new.space_id
             
-            if (!subscriptionCacheRef.current.has(postSpaceId)) {
-              const { data: space } = await supabaseClient
-                .from('spaces')
-                .select('id, is_public')
-                .eq('id', postSpaceId)
-                .maybeSingle()
-
-              if (space?.is_public) {
-                subscriptionCacheRef.current.set(postSpaceId, true)
-                setPosts(prev => [payload.new as Post, ...prev])
-              } else {
-                const { data: subscription } = await supabaseClient
-                  .from('user_spaces')
-                  .select('id')
-                  .eq('clerk_id', userId)
-                  .eq('space_id', postSpaceId)
-                  .maybeSingle()
-
-                if (subscription) {
-                  subscriptionCacheRef.current.set(postSpaceId, true)
-                  setPosts(prev => [payload.new as Post, ...prev])
-                } else {
-                  subscriptionCacheRef.current.set(postSpaceId, false)
-                }
-              }
-            } else if (subscriptionCacheRef.current.get(postSpaceId)) {
+            // Проверяем, разрешено ли отображение постов из этого пространства
+            if (allowedSpaceIds.includes(postSpaceId)) {
               setPosts(prev => [payload.new as Post, ...prev])
             }
           }

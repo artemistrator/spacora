@@ -15,6 +15,7 @@ import {
   WifiOff,
   RefreshCw
 } from 'lucide-react'
+import { getOrCreateSupabaseUserId } from '@/lib/user-mapping'
 
 interface Post {
   id: string
@@ -153,10 +154,13 @@ export default function PostPage({ params }: { params: { id: string } }) {
           let actingSpaceId = null
           
           // First, check if user owns any space
+          // Получаем правильный UUID для пользователя
+          const supabaseUserId = await getOrCreateSupabaseUserId(userId);
+          
           const { data: anyOwnedSpace, error: anyOwnedSpaceError } = await supabaseClient
             .from('spaces')
             .select('id')
-            .eq('owner_id', userId)
+            .eq('owner_id', supabaseUserId) // Используем правильный UUID вместо Clerk ID
             .limit(1)
             .maybeSingle()
             
